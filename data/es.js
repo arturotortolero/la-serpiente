@@ -14,6 +14,10 @@ window.LANGS.es = {
   name: 'Español',
   voiceLang: 'es-ES',
   audioDir: 'es',
+  sylFromWord: true,   // la sílaba de la palabra son sus dos primeras letras (en francés se indica con `syl`)
+
+  /* Control de desarrollo: devuelve un mensaje si la palabra rompe la regla /θ/ (C+e/i o Z). */
+  check: w => (/c[eiéí]|z/i.test(w.word) ? 'suena /θ/' : ''),
 
   ui: {
     appTitle: 'La Serpiente',

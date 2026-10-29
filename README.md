@@ -24,9 +24,10 @@ Dos formas, por orden de prioridad:
 2. **Como archivos**: `audio/es/<id>.mp3` (por ejemplo `sol.mp3`, `sa.mp3`, `sss.mp3`).
 Si no hay grabación, se usa la voz del dispositivo.
 
-## Nuevo idioma
-Copia `data/es.js` a `data/ca.js` o `data/fr.js`, traduce, y descomenta su `<script>` en `index.html`.
-La app activa sola el botón del idioma.
+## Idiomas
+Español (`data/es.js`) y francés (`data/fr.js`). Para añadir otro (p. ej. catalán): copia un archivo de datos a `data/ca.js`, traduce `ui`, `syllables` y `words`, añade su `<script>` en `index.html` y el archivo en `sw.js`. La app activa sola el botón del idioma.
+El progreso (pegatinas, palabras a repasar, palabras activas) es independiente por idioma; las estrellas y los premios son comunes.
+En francés se trabaja el **sonido** /s/, no la letra: ver la cabecera de `data/fr.js` (la `s` entre vocales suena /z/, y /s/ también se escribe c, ç, ss, x; por eso cada palabra tiene `hl`, lo que se resalta).
 
 ## Panel del adulto
 Pulsación larga (~1 s) sobre el engranaje discreto de la esquina inferior derecha de la pantalla de inicio.

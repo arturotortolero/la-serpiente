@@ -2,7 +2,7 @@
 (() => {
 'use strict';
 
-const APP_VERSION = '2.0'; // súbelo en cada cambio: se ve en el panel del adulto
+const APP_VERSION = '2.1'; // súbelo en cada cambio: se ve en el panel del adulto
 
 /* ====================== utilidades ====================== */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -16,7 +16,13 @@ const shuffle = a => {
   }
   return r;
 };
-const highlight = word => word.replace(/s/gi, m => `<b class="s">${m}</b>`);
+/* Resalta la S. `hl` (opcional) indica la letra o grupo que suena /s/ (ss, c, ç, x en francés). */
+const highlight = w => {
+  if (!w.hl) return w.word.replace(/s/gi, m => `<b class="s">${m}</b>`);
+  const i = w.word.toLowerCase().indexOf(w.hl);
+  if (i < 0) return w.word;
+  return `${w.word.slice(0, i)}<b class="s">${w.word.slice(i, i + w.hl.length)}</b>${w.word.slice(i + w.hl.length)}`;
+};
 
 /* ====================== idiomas ====================== */
 const LANG_LIST = [
@@ -35,7 +41,7 @@ const defaults = () => ({
   stickers: {},       // pegatinas ganadas: una palabra dicha bien (✅) la primera vez
   prizes: [], sessions: 0,
   offWords: {}, offPos: {},
-  voice: '', rate: 0.85, roundSize: 8
+  voiceBy: {}, rate: 0.85, roundSize: 8   // voiceBy: voz elegida por idioma
 });
 let store = defaults();
 try {
@@ -53,10 +59,9 @@ const posOn = p => !store.offPos[`${L.code}:${p}`];
 const isOn = w => !store.offWords[wkey(w)] && (w.position === null || posOn(w.position));
 const pool = fn => L.words.filter(w => isOn(w) && fn(w));
 
-/* Aviso de desarrollo: palabras que romperían la regla /θ/ del español peninsular */
-if (L.code === 'es') {
-  L.words.filter(w => /c[eiéí]|z/i.test(w.word)).forEach(w => console.warn('Palabra con /θ/:', w.word));
-}
+/* Aviso de desarrollo: palabras que rompen la regla de pronunciación del idioma (ver data/*.js) */
+const checkWords = () => { if (L.check) L.words.forEach(w => { const m = L.check(w); if (m) console.warn(`[${L.code}] ${w.word}: ${m}`); }); };
+checkWords();
 
 /* ====================== audio: voz y efectos ====================== */
 let actx = null;
@@ -127,7 +132,7 @@ const Sound = {
       if (norm(v) === want) n += 10; else if (!norm(v).startsWith(want.slice(0, 2))) return -1;
       if (/natural|neural|online|premium|enhanced|mejorad|siri/i.test(v.name)) n += 20;
       if (/google|microsoft/i.test(v.name)) n += 6;
-      if (/m[oó]nica|marisol|jorge|elvira|alvaro|álvaro|lucia|lucía|paulina|diego/i.test(v.name)) n += 4;
+      if (/m[oó]nica|marisol|jorge|elvira|alvaro|álvaro|lucia|lucía|paulina|diego|am[eé]lie|thomas|audrey|aur[eé]lie|hortense|denise|henri|eloise|julie/i.test(v.name)) n += 4;
       if (/compact|espeak/i.test(v.name + v.voiceURI)) n -= 8;
       return n;
     };
@@ -137,7 +142,7 @@ const Sound = {
 
   pickVoice() {
     const vs = this.voices();
-    this.voice = vs.find(v => v.voiceURI === store.voice) || vs[0] || null;
+    this.voice = vs.find(v => v.voiceURI === (store.voiceBy || {})[L.code]) || vs[0] || null;
   },
 
   stop() {
@@ -412,7 +417,7 @@ function screenHome() {
     b.onclick = () => {
       const d = langData(b.dataset.lang);
       if (!d) return;
-      store.lang = b.dataset.lang; save(); L = d; Sound.pickVoice();
+      store.lang = b.dataset.lang; save(); L = d; document.documentElement.lang = L.code; checkWords(); Sound.pickVoice();
       Sound.probe(audioIds()); Sound.loadClips();
       go(screenHome);
     };
@@ -563,7 +568,7 @@ function screenListen(pos, opts = {}) {
   function showCard() {
     const w = queue[idx];
     $('.emoji', card).textContent = w.emoji;
-    $('.word', card).innerHTML = highlight(w.word);
+    $('.word', card).innerHTML = highlight(w);
     card.classList.remove('pop'); void card.offsetWidth; card.classList.add('pop');
     $('#bar').style.width = Math.round((idx / queue.length) * 100) + '%';
     locked = false;
@@ -733,7 +738,8 @@ function screenTrain(level, opts = {}) {
 
 /* ====================== 4. Sílabas ====================== */
 function screenSyllables(opts = {}) {
-  const sylOf = w => L.syllables.find(s => w.word.toLowerCase().startsWith(s.id));
+  // sílaba con la que suena el inicio: `syl` en los datos, o (es) las dos primeras letras
+  const sylOf = w => L.syllables.find(s => s.id === (w.syl || (L.sylFromWord ? w.word.toLowerCase().slice(0, 2) : '')));
   const candidates = () => pool(w => w.hasS && w.position === 'inicio' && sylOf(w));
   let mode = 'free', queue = [], idx = 0, earned = 0, tries = 0, busy = false, alive = true;
   cleanup = () => { alive = false; };
@@ -953,7 +959,7 @@ function openAdultPanel() {
       <div class="chips">${[5, 8, 10].map(n => `<button class="chip ${roundSize() === n ? 'on' : ''}" data-size="${n}">${n}</button>`).join('')}</div>
       <h3>${t('voice')}</h3>
       <div class="row" style="justify-content:flex-start">
-        <select id="voiceSel" class="sel"><option value="">${t('voiceAuto')}</option>${Sound.voices().map(v => `<option value="${v.voiceURI}" ${v.voiceURI === store.voice ? 'selected' : ''}>${v.name} (${v.lang})</option>`).join('')}</select>
+        <select id="voiceSel" class="sel"><option value="">${t('voiceAuto')}</option>${Sound.voices().map(v => `<option value="${v.voiceURI}" ${v.voiceURI === (store.voiceBy || {})[L.code] ? 'selected' : ''}>${v.name} (${v.lang})</option>`).join('')}</select>
         <select id="rateSel" class="sel">${[0.7, 0.8, 0.85, 0.95, 1].map(r => `<option value="${r}" ${r === store.rate ? 'selected' : ''}>${t('speed')} ${r}</option>`).join('')}</select>
         <button class="btn c-lemon" id="tryVoice">🔊 ${t('tryVoice')}</button>
       </div>
@@ -968,7 +974,7 @@ function openAdultPanel() {
       <div><button class="btn c-red" data-a="reset">${t('reset')}</button></div>
       <p class="hint">v${APP_VERSION} · ${store.sessions} ${t('sessionsDone')}</p></div>`;
     $$('[data-size]', o).forEach(b => b.onclick = () => { store.roundSize = +b.dataset.size; save(); draw(); });
-    $('#voiceSel', o).onchange = e => { store.voice = e.target.value; save(); Sound.pickVoice(); Sound.speak(L.words[0].word); };
+    $('#voiceSel', o).onchange = e => { store.voiceBy = { ...store.voiceBy, [L.code]: e.target.value }; save(); Sound.pickVoice(); Sound.speak(L.words[0].word); };
     $('#rateSel', o).onchange = e => { store.rate = +e.target.value; save(); Sound.speak(L.words[0].word); };
     $('#tryVoice', o).onclick = () => Sound.speak(L.words[0].word);
     $('[data-a=voices]', o).onclick = () => { o.remove(); go(screenVoices); };
@@ -981,8 +987,8 @@ function openAdultPanel() {
     $('[data-a=close]', o).onclick = () => { o.remove(); go(screenHome); };
     $('[data-a=reset]', o).onclick = () => {
       if (!confirm(t('resetConfirm'))) return;
-      const { lang, voice, rate, roundSize: rs } = store;
-      store = { ...defaults(), lang, voice, rate, roundSize: rs }; save(); draw();
+      const { lang, voiceBy, rate, roundSize: rs } = store;
+      store = { ...defaults(), lang, voiceBy, rate, roundSize: rs }; save(); draw();
     };
     o.scrollTop = keep;
   };
@@ -991,6 +997,7 @@ function openAdultPanel() {
 }
 
 /* ====================== arranque ====================== */
+document.documentElement.lang = L.code;
 Sound.probe(audioIds());
 Sound.loadClips();
 screenHome();
