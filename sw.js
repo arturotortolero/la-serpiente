@@ -1,5 +1,5 @@
 /* Service worker mínimo: red primero, caché como respaldo (funciona sin conexión). */
-const CACHE = 'serpiente-v1';
+const CACHE = 'serpiente-v2';
 const FILES = [
   './', 'index.html', 'styles.css', 'app.js', 'data/es.js',
   'manifest.webmanifest', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png'
@@ -21,7 +21,7 @@ self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
   e.respondWith(
-    fetch(req)
+    fetch(req, { cache: 'no-cache' })
       .then(res => {
         if (res.status === 200) {
           const copy = res.clone();

@@ -222,3 +222,4 @@ b.s { color: var(--s-color); font-size: 1.25em; }
 }
 
 .sel { font: inherit; font-size: 18px; min-height: 64px; padding: 0 14px; border-radius: 20px; border: 0; background: #fff; box-shadow: var(--shadow); max-width: 100%; }
+.hint { color: var(--ink-soft); font-size: 16px; }

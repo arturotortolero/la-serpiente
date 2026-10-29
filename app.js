@@ -2,6 +2,8 @@
 (() => {
 'use strict';
 
+const APP_VERSION = '1.3'; // súbelo en cada cambio: se ve en el panel del adulto
+
 /* ====================== utilidades ====================== */
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -668,13 +670,15 @@ function openAdultPanel() {
         <select id="rateSel" class="sel">${[0.7, 0.8, 0.85, 0.95, 1].map(r => `<option value="${r}" ${r === store.rate ? 'selected' : ''}>${t('speed')} ${r}</option>`).join('')}</select>
         <button class="btn c-lemon" id="tryVoice">🔊 ${t('tryVoice')}</button>
       </div>
+      ${Sound.voices().length ? '' : `<p class="hint">${t('noVoices')}</p>`}
       <h3>${t('positions')}</h3>
       <div class="chips">${POSITIONS.map(p => `<button class="chip ${posOn(p) ? 'on' : 'off'}" data-p="${p}">${t('pos_' + p)}</button>`).join('')}</div>
       <h3>${t('words')}</h3>
       ${POSITIONS.map(p => `<div class="chips">${L.words.filter(w => w.position === p).map(chip).join('')}</div>`).join('')}
       <h3>${t('noS')}</h3>
       <div class="chips">${L.words.filter(w => !w.hasS).map(chip).join('')}</div>
-      <div><button class="btn c-red" data-a="reset">${t('reset')}</button></div></div>`;
+      <div><button class="btn c-red" data-a="reset">${t('reset')}</button></div>
+      <p class="hint">v${APP_VERSION}</p></div>`;
     $('#voiceSel', o).onchange = e => { store.voice = e.target.value; save(); Sound.pickVoice(); Sound.speak(L.words[0].word); };
     $('#rateSel', o).onchange = e => { store.rate = +e.target.value; save(); Sound.speak(L.words[0].word); };
     $('#tryVoice', o).onclick = () => Sound.speak(L.words[0].word);
@@ -700,5 +704,11 @@ Sound.probe(['sss', ...L.syllables.map(x => x.id), ...L.words.map(w => w.id)]);
 screenHome();
 if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
+  // Cuando se instala una versión nueva, recarga una vez para usarla
+  let reloaded = false, hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (hadController && !reloaded) { reloaded = true; location.reload(); }
+    hadController = true;
+  });
 }
 })();

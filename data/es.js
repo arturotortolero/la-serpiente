@@ -47,7 +47,8 @@ window.LANGS.es = {
     voice: 'Voz',
     voiceAuto: 'Automática (la más natural)',
     speed: 'Velocidad',
-    tryVoice: 'Probar'
+    tryVoice: 'Probar',
+    noVoices: 'Este dispositivo no ofrece voces en español. Instala una en los ajustes del sistema.'
   },
 
   // Texto que se pronuncia (`say`) puede ajustarse si la voz sintética lo lee mal.
