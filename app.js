@@ -26,7 +26,7 @@ const langData = code => (window.LANGS || {})[code];
 
 /* ====================== progreso (localStorage) ====================== */
 const KEY = 'serpiente.v1';
-const defaults = () => ({ lang: 'es', stars: 0, again: {}, offWords: {}, offPos: {} });
+const defaults = () => ({ lang: 'es', stars: 0, again: {}, offWords: {}, offPos: {}, voice: '', rate: 0.85 });
 let store = defaults();
 try {
   const raw = localStorage.getItem(KEY);
@@ -62,12 +62,27 @@ const Sound = {
   current: null,
   missing: new Set(),
 
-  pickVoice() {
-    if (!('speechSynthesis' in window)) return;
-    const vs = speechSynthesis.getVoices();
+  /* Voces del idioma, las más naturales primero (neuronales / mejoradas / en la nube suenan menos robóticas). */
+  voices() {
+    if (!('speechSynthesis' in window)) return [];
     const want = L.voiceLang.toLowerCase();
     const norm = v => v.lang.replace('_', '-').toLowerCase();
-    this.voice = vs.find(v => norm(v) === want) || vs.find(v => norm(v).startsWith(want.slice(0, 2))) || null;
+    const score = v => {
+      let n = 0;
+      if (norm(v) === want) n += 10; else if (!norm(v).startsWith(want.slice(0, 2))) return -1;
+      if (/natural|neural|online|premium|enhanced|mejorad|siri/i.test(v.name)) n += 20;
+      if (/google|microsoft/i.test(v.name)) n += 6;
+      if (/m[oó]nica|marisol|jorge|elvira|alvaro|álvaro|lucia|lucía|paulina|diego/i.test(v.name)) n += 4;
+      if (/compact|espeak/i.test(v.name + v.voiceURI)) n -= 8;
+      return n;
+    };
+    return speechSynthesis.getVoices().map(v => [score(v), v]).filter(x => x[0] >= 0)
+      .sort((a, b) => b[0] - a[0]).map(x => x[1]);
+  },
+
+  pickVoice() {
+    const vs = this.voices();
+    this.voice = vs.find(v => v.voiceURI === store.voice) || vs[0] || null;
   },
 
   stop() {
@@ -103,7 +118,7 @@ const Sound = {
     const u = new SpeechSynthesisUtterance(text);
     u.lang = L.voiceLang;
     if (this.voice) u.voice = this.voice;
-    u.rate = 0.8;
+    u.rate = store.rate || 0.85;
     speechSynthesis.speak(u);
   },
 
@@ -647,6 +662,12 @@ function openAdultPanel() {
         <button class="btn c-sky" data-a="close">${t('close')}</button></div>
       <h3>${t('mostAgain')}</h3>
       ${top.length ? `<ol>${top.map(x => `<li>${x.w.emoji} ${x.w.word} — <b>${x.n}</b></li>`).join('')}</ol>` : `<p>${t('noneYet')}</p>`}
+      <h3>${t('voice')}</h3>
+      <div class="row" style="justify-content:flex-start">
+        <select id="voiceSel" class="sel"><option value="">${t('voiceAuto')}</option>${Sound.voices().map(v => `<option value="${v.voiceURI}" ${v.voiceURI === store.voice ? 'selected' : ''}>${v.name} (${v.lang})</option>`).join('')}</select>
+        <select id="rateSel" class="sel">${[0.7, 0.8, 0.85, 0.95, 1].map(r => `<option value="${r}" ${r === store.rate ? 'selected' : ''}>${t('speed')} ${r}</option>`).join('')}</select>
+        <button class="btn c-lemon" id="tryVoice">🔊 ${t('tryVoice')}</button>
+      </div>
       <h3>${t('positions')}</h3>
       <div class="chips">${POSITIONS.map(p => `<button class="chip ${posOn(p) ? 'on' : 'off'}" data-p="${p}">${t('pos_' + p)}</button>`).join('')}</div>
       <h3>${t('words')}</h3>
@@ -654,6 +675,9 @@ function openAdultPanel() {
       <h3>${t('noS')}</h3>
       <div class="chips">${L.words.filter(w => !w.hasS).map(chip).join('')}</div>
       <div><button class="btn c-red" data-a="reset">${t('reset')}</button></div></div>`;
+    $('#voiceSel', o).onchange = e => { store.voice = e.target.value; save(); Sound.pickVoice(); Sound.speak(L.words[0].word); };
+    $('#rateSel', o).onchange = e => { store.rate = +e.target.value; save(); Sound.speak(L.words[0].word); };
+    $('#tryVoice', o).onclick = () => Sound.speak(L.words[0].word);
     $$('[data-p]', o).forEach(b => b.onclick = () => {
       const k = `${L.code}:${b.dataset.p}`; store.offPos[k] = !store.offPos[k]; save(); draw();
     });
@@ -663,7 +687,7 @@ function openAdultPanel() {
     $('[data-a=close]', o).onclick = () => { o.remove(); go(screenHome); };
     $('[data-a=reset]', o).onclick = () => {
       if (!confirm(t('resetConfirm'))) return;
-      const lang = store.lang; store = defaults(); store.lang = lang; save(); draw();
+      const { lang, voice, rate } = store; store = { ...defaults(), lang, voice, rate }; save(); draw();
     };
     o.scrollTop = keep;
   };

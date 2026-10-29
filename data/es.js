@@ -43,7 +43,11 @@ window.LANGS.es = {
     noS: 'Sin S',
     reset: 'Borrar progreso',
     resetConfirm: '¿Borrar estrellas y progreso?',
-    close: 'Cerrar'
+    close: 'Cerrar',
+    voice: 'Voz',
+    voiceAuto: 'Automática (la más natural)',
+    speed: 'Velocidad',
+    tryVoice: 'Probar'
   },
 
   // Texto que se pronuncia (`say`) puede ajustarse si la voz sintética lo lee mal.
