@@ -1,7 +1,7 @@
 /* Service worker mínimo: red primero, caché como respaldo (funciona sin conexión). */
-const CACHE = 'serpiente-v4';
+const CACHE = 'serpiente-v5';
 const FILES = [
-  './', 'index.html', 'styles.css', 'app.js', 'data/es.js', 'data/fr.js',
+  './', 'index.html', 'styles.css', 'app.js', 'data/es.js', 'data/fr.js', 'data/ca.js',
   'manifest.webmanifest', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png'
 ];
 

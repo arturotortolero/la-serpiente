@@ -2,7 +2,7 @@
 (() => {
 'use strict';
 
-const APP_VERSION = '2.1'; // súbelo en cada cambio: se ve en el panel del adulto
+const APP_VERSION = '2.2'; // súbelo en cada cambio: se ve en el panel del adulto
 
 /* ====================== utilidades ====================== */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -132,7 +132,7 @@ const Sound = {
       if (norm(v) === want) n += 10; else if (!norm(v).startsWith(want.slice(0, 2))) return -1;
       if (/natural|neural|online|premium|enhanced|mejorad|siri/i.test(v.name)) n += 20;
       if (/google|microsoft/i.test(v.name)) n += 6;
-      if (/m[oó]nica|marisol|jorge|elvira|alvaro|álvaro|lucia|lucía|paulina|diego|am[eé]lie|thomas|audrey|aur[eé]lie|hortense|denise|henri|eloise|julie/i.test(v.name)) n += 4;
+      if (/m[oó]nica|marisol|jorge|elvira|alvaro|álvaro|lucia|lucía|paulina|diego|jordi|montserrat|joana|enric|am[eé]lie|thomas|audrey|aur[eé]lie|hortense|denise|henri|eloise|julie/i.test(v.name)) n += 4;
       if (/compact|espeak/i.test(v.name + v.voiceURI)) n -= 8;
       return n;
     };
