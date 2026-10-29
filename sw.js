@@ -23,7 +23,7 @@ self.addEventListener('fetch', e => {
   e.respondWith(
     fetch(req)
       .then(res => {
-        if (res.ok) {
+        if (res.status === 200) {
           const copy = res.clone();
           caches.open(CACHE).then(c => c.put(req, copy));
         }

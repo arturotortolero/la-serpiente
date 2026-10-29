@@ -71,9 +71,32 @@ const Sound = {
   },
 
   stop() {
-    if ('speechSynthesis' in window) speechSynthesis.cancel();
+    if ('speechSynthesis' in window && (speechSynthesis.speaking || speechSynthesis.pending)) speechSynthesis.cancel();
     if (this.current) { this.current.pause(); this.current = null; }
   },
+
+  /* iOS solo deja hablar a la voz sintética tras un gesto del usuario: la "desbloqueamos" en el primer toque. */
+  unlock() {
+    getCtx();
+    if (this.unlocked || !('speechSynthesis' in window)) return;
+    this.unlocked = true;
+    const u = new SpeechSynthesisUtterance(' ');
+    u.volume = 0;
+    speechSynthesis.speak(u);
+  },
+
+  /* Comprueba qué mp3 existen (en segundo plano) para decidir en el acto, dentro del gesto, entre mp3 y voz. */
+  probe(ids) {
+    if (!/^https?:$/.test(location.protocol)) return;
+    this.probed = false;
+    Promise.all(ids.map(id => {
+      const path = `audio/${L.audioDir}/${id}.mp3`;
+      return fetch(path, { method: 'HEAD' })
+        .then(r => { (r.ok ? this.found : this.missing).add(path); })
+        .catch(() => { this.missing.add(path); });
+    })).then(() => { this.probed = true; });
+  },
+  found: new Set(),
 
   speak(text) {
     if (!('speechSynthesis' in window)) return;
@@ -89,13 +112,14 @@ const Sound = {
     this.stop();
     const fall = () => (fallback ? fallback() : this.speak(text));
     const path = `audio/${L.audioDir}/${id}.mp3`;
-    if (this.missing.has(path)) return fall();
+    if (this.missing.has(path) || (!this.found.has(path) && this.probed)) return fall();
     const a = new Audio(path);
     this.current = a;
     a.onerror = () => { this.missing.add(path); if (this.current === a) fall(); };
     a.play().catch(() => {});
   },
 
+  probed: false,
   word(w) { this.say(w.id, w.word); },
   syllable(s) { this.say(s.id, s.say); },
 
@@ -137,6 +161,7 @@ const Sound = {
     });
   }
 };
+document.addEventListener('pointerdown', () => Sound.unlock(), { once: true, capture: true });
 if ('speechSynthesis' in window) {
   Sound.pickVoice();
   speechSynthesis.onvoiceschanged = () => Sound.pickVoice();
@@ -254,7 +279,9 @@ function screenHome() {
     b.onclick = () => {
       const d = langData(b.dataset.lang);
       if (!d) return;
-      store.lang = b.dataset.lang; save(); L = d; Sound.pickVoice(); go(screenHome);
+      store.lang = b.dataset.lang; save(); L = d; Sound.pickVoice();
+      Sound.probe(['sss', ...L.syllables.map(x => x.id), ...L.words.map(w => w.id)]);
+      go(screenHome);
     };
   });
   // Pulsación larga (~1 s) para abrir el panel del adulto
@@ -283,7 +310,7 @@ function screenWarmup() {
   const setLen = n => segs.forEach((s, i) => s.classList.toggle('on', i < n));
   setLen(2);
 
-  let running = false, raf = 0, acc = 0, last = 0, smooth = 0, src = null, analyser = null;
+  let running = false, starting = false, raf = 0, acc = 0, last = 0, smooth = 0, src = null, analyser = null;
   const idleLabel = `🎤 ${t('yourTurn')}`;
 
   function stop() {
@@ -292,9 +319,11 @@ function screenWarmup() {
     micBtn.classList.remove('listening'); micBtn.textContent = idleLabel;
     fill.style.width = '0%';
   }
-  cleanup = stop;
+  cleanup = () => { stop(); releaseMic(); };
 
   async function start() {
+    if (starting) return;
+    starting = true;
     getCtx();
     try {
       const stream = await getMic();
@@ -302,7 +331,8 @@ function screenWarmup() {
       analyser = actx.createAnalyser();
       analyser.fftSize = 1024;
       src.connect(analyser);
-    } catch (e) { msg.textContent = micError(e); return; }
+    } catch (e) { msg.textContent = micError(e); starting = false; return; }
+    starting = false;
     msg.textContent = '';
     running = true; acc = 0; smooth = 0; last = performance.now();
     setLen(2);
@@ -357,9 +387,9 @@ function buildListenQueue(pos) {
 
 function screenListen(pos) {
   const queue = buildListenQueue(pos);
-  const total = queue.length;
+  if (!queue.length) { go(screenHome); return; }
   const retried = new Set();
-  let idx = 0, earned = 0;
+  let idx = 0, earned = 0, locked = false;
 
   app.innerHTML = topbar(t('listen')) + `<main class="listen-main">
     <div class="stage">
@@ -367,96 +397,23 @@ function screenListen(pos) {
       <div class="progress"><i id="bar"></i></div>
     </div>
     <div class="stage">
-      <div class="row">
-        <button class="btn round c-sky" id="say" aria-label="Escuchar">🔊</button>
-        <button class="btn round c-pink" id="mic" aria-label="Grabar">🎤</button>
-        <button class="btn round c-lemon" id="play" aria-label="Oír mi voz" disabled>▶️</button>
-      </div>
-      <p class="hint" id="hint"></p>
+      <button class="btn round big-say c-sky" id="say" aria-label="Escuchar">🔊</button>
       <div class="row">
         <button class="btn round c-green" id="ok" aria-label="Bien">✅</button>
         <button class="btn round c-peach" id="again" aria-label="Otra vez">🔁</button>
       </div>
     </div></main>`;
   bindHome();
-
-  const card = $('#card'), micBtn = $('#mic'), playBtn = $('#play'), hint = $('#hint');
-  let rec = null, chunks = [], recording = false, pressAt = 0, maxTimer = 0, recBuf = null, recBlob = null, playing = null;
-
-  function clearRecording() {
-    stopRec(true);
-    if (playing) { try { playing.stop(); } catch (e) {} playing = null; }
-    recBuf = null; recBlob = null; playBtn.disabled = true; hint.textContent = '';
-  }
-
-  function stopRec(silent) {
-    clearTimeout(maxTimer);
-    if (rec && rec.state === 'recording') {
-      if (silent) rec.onstop = null;
-      rec.stop();
-    }
-    recording = false; micBtn.classList.remove('rec'); micBtn.textContent = '🎤';
-  }
-  cleanup = () => { clearRecording(); };
-
-  async function startRec() {
-    if (typeof MediaRecorder === 'undefined') { hint.textContent = t('micUnavailable'); return; }
-    let stream;
-    try { stream = await getMic(); } catch (e) { hint.textContent = micError(e); return; }
-    const mime = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm', 'audio/ogg'].find(m => MediaRecorder.isTypeSupported(m));
-    rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
-    chunks = [];
-    rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
-    rec.onstop = async () => {
-      recBlob = new Blob(chunks, { type: rec.mimeType || mime || 'audio/webm' });
-      recBuf = null;
-      try { recBuf = await actx.decodeAudioData(await recBlob.arrayBuffer()); } catch (e) { /* usamos <audio> */ }
-      playBtn.disabled = false;
-      playRec();
-    };
-    rec.start();
-    recording = true; micBtn.classList.add('rec'); micBtn.textContent = '⏹';
-    hint.textContent = '';
-    maxTimer = setTimeout(() => stopRec(), 8000); // por si se olvida parar
-  }
-
-  function playRec() {
-    Sound.stop();
-    if (playing) { try { playing.stop(); } catch (e) {} playing = null; }
-    if (recBuf && actx) {
-      const s = actx.createBufferSource();
-      s.buffer = recBuf; s.connect(actx.destination); s.start();
-      playing = s;
-    } else if (recBlob) {
-      const a = new Audio(URL.createObjectURL(recBlob));
-      a.onended = () => URL.revokeObjectURL(a.src);
-      a.play().catch(() => {});
-    }
-  }
-
-  // Pulsar y soltar (mantener) o pulsar para empezar / pulsar para parar
-  micBtn.addEventListener('pointerdown', e => {
-    e.preventDefault();
-    getCtx(); Sound.stop();
-    if (recording) { stopRec(); pressAt = 0; return; }
-    pressAt = Date.now();
-    startRec();
-  });
-  micBtn.addEventListener('pointerup', () => {
-    if (recording && pressAt && Date.now() - pressAt > 600) stopRec();
-    pressAt = 0;
-  });
-  micBtn.addEventListener('contextmenu', e => e.preventDefault());
-  playBtn.onclick = () => playRec();
+  const card = $('#card');
 
   function showCard() {
-    clearRecording();
     const w = queue[idx];
     $('.emoji', card).textContent = w.emoji;
     $('.word', card).innerHTML = highlight(w.word);
     card.classList.remove('pop'); void card.offsetWidth; card.classList.add('pop');
     $('#bar').style.width = Math.round((idx / queue.length) * 100) + '%';
-    setTimeout(() => Sound.word(w), 250);
+    locked = false;
+    Sound.word(w);
   }
   function next() {
     idx++;
@@ -470,15 +427,20 @@ function screenListen(pos) {
 
   $('#say').onclick = () => Sound.word(queue[idx]);
   card.onclick = () => Sound.word(queue[idx]);
-  $('#ok').onclick = e => { earned++; addStar(e.currentTarget); Sound.chime(); setTimeout(next, 650); };
+  $('#ok').onclick = e => {
+    if (locked) return;
+    locked = true; earned++; addStar(e.currentTarget); Sound.chime();
+    setTimeout(next, 650);
+  };
   $('#again').onclick = () => {
+    if (locked) return;
+    locked = true;
     const w = queue[idx];
     store.again[wkey(w)] = (store.again[wkey(w)] || 0) + 1; save();
     if (!retried.has(w.id)) { retried.add(w.id); queue.push(w); } // una segunda oportunidad al final
     next();
   };
 
-  if (!total) { go(screenHome); return; }
   showCard();
 }
 
@@ -506,8 +468,8 @@ function screenTrain(level) {
     </div>
     <div class="train">
       <div class="engine">🚂</div>
-      <button class="wagon yes" data-ans="yes"><span class="wicon">🐍</span>${t('withS')}</button>
-      <button class="wagon no" data-ans="no"><span class="wicon">🤐</span>${t('withoutS')}</button>
+      <button class="wagon yes" data-ans="yes"><span class="wicon">🐍</span>${t('withS')}<i class="wheel l"></i><i class="wheel r"></i></button>
+      <button class="wagon no" data-ans="no"><span class="wicon">🤐</span>${t('withoutS')}<i class="wheel l"></i><i class="wheel r"></i></button>
     </div></div>`;
   bindHome();
   const stage = $('#stage'), wrap = $('#wrap'), card = $('#card'), wagons = $$('.wagon');
@@ -598,9 +560,7 @@ function screenTrain(level) {
   card.addEventListener('pointercancel', () => { drag = null; card.style.transition = 'transform .3s'; card.style.transform = 'none'; });
   wagons.forEach(wg => {
     wg.onclick = () => {
-      if (busy) return;
-      if (selected) answer(wg);
-      else { wrap.classList.remove('shake'); void wrap.offsetWidth; wrap.classList.add('shake'); } // pista: primero la tarjeta
+      if (!busy) answer(wg); // basta con tocar el vagón; arrastrar o tocar la tarjeta primero también vale
     };
   });
   $('#say').onclick = () => Sound.word(queue[idx]);
@@ -672,6 +632,7 @@ function screenSyllables() {
 
 /* ====================== Panel del adulto ====================== */
 function openAdultPanel() {
+  if ($('.adult')) return;
   const o = document.createElement('div');
   o.className = 'overlay adult';
   const draw = () => {
@@ -711,6 +672,7 @@ function openAdultPanel() {
 }
 
 /* ====================== arranque ====================== */
+Sound.probe(['sss', ...L.syllables.map(x => x.id), ...L.words.map(w => w.id)]);
 screenHome();
 if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
