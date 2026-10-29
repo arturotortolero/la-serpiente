@@ -2,7 +2,7 @@
 (() => {
 'use strict';
 
-const APP_VERSION = '2.2'; // súbelo en cada cambio: se ve en el panel del adulto
+const APP_VERSION = '2.3'; // súbelo en cada cambio: se ve en el panel del adulto
 
 /* ====================== utilidades ====================== */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -870,8 +870,10 @@ function screenVoices() {
     ...L.syllables.map(s => ({ id: s.id, label: s.text, emoji: s.text })),
     ...L.words.map(w => ({ id: w.id, label: w.word, emoji: w.emoji }))
   ];
-  let i = 0, rec = null, chunks = [], recording = false, maxTimer = 0;
+  let i = 0, rec = null, chunks = [], recording = false, maxTimer = 0, alive = true, onlyPending = false, advTimer = 0;
   const has = it => Sound.clips.has(it.id);
+  const nextPending = from => { for (let k = 1; k <= items.length; k++) { const j = (from + k) % items.length; if (!has(items[j])) return j; } return -1; };
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {} // pide que el sistema no borre las grabaciones
 
   app.innerHTML = topbar(t('recordVoices')) + `<main class="voices-main">
     <div class="count" id="vcount"></div>
@@ -884,6 +886,12 @@ function screenVoices() {
       <button class="btn round c-peach" id="vdel" aria-label="Borrar">🗑</button>
       <button class="btn round c-lilac" id="vnext" aria-label="Siguiente">⏭</button>
     </div>
+    <div class="row">
+      <button class="chip" id="vfilter"></button>
+      <button class="chip" id="vexport">💾 ${t('exportVoices')}</button>
+      <button class="chip" id="vimport">📂 ${t('importVoices')}</button>
+      <input type="file" id="vfile" accept="application/json,.json" hidden>
+    </div>
     <div class="chips vchips" id="vchips"></div></main>`;
   bindHome();
   const recBtn = $('#vrec'), hint = $('#vhint');
@@ -893,7 +901,7 @@ function screenVoices() {
     if (rec && rec.state === 'recording') { if (silent) rec.onstop = null; rec.stop(); }
     recording = false; recBtn.classList.remove('rec'); recBtn.textContent = '⏺';
   }
-  cleanup = () => { stopRec(true); releaseMic(); };
+  cleanup = () => { alive = false; clearTimeout(advTimer); stopRec(true); releaseMic(); };
 
   function draw() {
     const it = items[i];
@@ -901,7 +909,9 @@ function screenVoices() {
     $('#vcard .word').textContent = it.label;
     $('#vplay').disabled = !has(it); $('#vdel').disabled = !has(it);
     $('#vcount').textContent = `${items.filter(has).length}/${items.length} ${t('recorded')}`;
-    $('#vchips').innerHTML = items.map((x, k) => `<button class="chip ${k === i ? 'on' : ''}" data-k="${k}">${has(x) ? '✔ ' : ''}${x.label}</button>`).join('');
+    $('#vfilter').textContent = onlyPending ? `◻ ${t('pendingOnly')}` : `☑ ${t('allItems')}`;
+    $('#vchips').innerHTML = items.map((x, k) => (!onlyPending || !has(x) || k === i)
+      ? `<button class="chip ${k === i ? 'on' : ''}" data-k="${k}">${has(x) ? '✔ ' : ''}${x.label}</button>` : '').join('');
     $$('#vchips [data-k]').forEach(b => { b.onclick = () => { stopRec(true); i = +b.dataset.k; hint.textContent = ''; draw(); }; });
   }
   async function startRec() {
@@ -921,6 +931,12 @@ function screenVoices() {
       Sound.setClip(it.id, blob);
       draw();
       Sound.say(it.id, it.label);
+      // tras oírla, pasa sola a la siguiente palabra pendiente
+      advTimer = setTimeout(() => {
+        if (!alive || items[i] !== it) return;
+        const j = nextPending(i);
+        if (j >= 0) { i = j; draw(); }
+      }, 2200);
     };
     rec.start();
     recording = true; recBtn.classList.add('rec'); recBtn.textContent = '⏹'; hint.textContent = '';
@@ -935,6 +951,36 @@ function screenVoices() {
   $('#vprev').onclick = () => { stopRec(true); i = (i + items.length - 1) % items.length; hint.textContent = ''; draw(); };
   $('#vnext').onclick = () => { stopRec(true); i = (i + 1) % items.length; hint.textContent = ''; draw(); };
   $('#vcard').onclick = () => { const it = items[i]; Sound.say(it.id, it.label); };
+  $('#vfilter').onclick = () => { onlyPending = !onlyPending; draw(); };
+
+  // Copia de seguridad: todas las grabaciones de este idioma en un archivo
+  const toDataUrl = blob => new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(blob); });
+  $('#vexport').onclick = async () => {
+    const rows = (await Clips.all()).filter(([k]) => k.startsWith(L.code + ':'));
+    if (!rows.length) { hint.textContent = t('noneYet'); return; }
+    const data = {};
+    for (const [k, blob] of rows) data[k.slice(L.code.length + 1)] = await toDataUrl(blob);
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify({ app: 'serpiente', lang: L.code, clips: data })], { type: 'application/json' }));
+    a.download = `serpiente-voces-${L.code}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  };
+  $('#vimport').onclick = () => $('#vfile').click();
+  $('#vfile').onchange = async e => {
+    const f = e.target.files[0]; if (!f) return;
+    try {
+      const d = JSON.parse(await f.text());
+      if (d.app !== 'serpiente' || d.lang !== L.code) throw new Error('bad');
+      if (!Clips.db) await Clips.open();
+      for (const [id, url] of Object.entries(d.clips)) {
+        const blob = await (await fetch(url)).blob();
+        await Clips.put(`${L.code}:${id}`, blob); Sound.setClip(id, blob);
+      }
+      hint.textContent = '✔'; draw();
+    } catch (err) { hint.textContent = t('noStorage'); }
+    e.target.value = '';
+  };
   draw();
 }
 
@@ -963,6 +1009,7 @@ function openAdultPanel() {
         <select id="rateSel" class="sel">${[0.7, 0.8, 0.85, 0.95, 1].map(r => `<option value="${r}" ${r === store.rate ? 'selected' : ''}>${t('speed')} ${r}</option>`).join('')}</select>
         <button class="btn c-lemon" id="tryVoice">🔊 ${t('tryVoice')}</button>
       </div>
+      <p class="hint">${t('voiceInUse')}: <b>${Sound.voice ? `${Sound.voice.name} (${Sound.voice.lang})` : t('noVoiceInUse')}</b></p>
       ${Sound.voices().length ? '' : `<p class="hint">${t('noVoices')}</p>`}
       <div><button class="btn c-pink" data-a="voices">🎙️ ${t('recordVoices')} <small>(${Sound.clips.size})</small></button></div>
       <h3>${t('positions')}</h3>
